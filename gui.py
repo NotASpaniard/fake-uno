@@ -1,11 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
 import math
-import random
-from game import Deck, Player, COLORS
-
-
-class UnoGUI:
     def __init__(self, root, player_names):
         self.root = root
         self.root.title('UNO - Round Table')
@@ -14,7 +9,7 @@ class UnoGUI:
         self.canvas = tk.Canvas(root, width=self.width, height=self.height, bg='#2b2b2b')
         self.canvas.pack(fill='both', expand=True)
 
-        # chỉnh kích cỡ cửa sổ
+        # resize handling
         self.canvas.bind('<Configure>', self.on_resize)
 
         # Game logic
@@ -26,16 +21,26 @@ class UnoGUI:
         self.direction = 1
         self.current = 0
 
-        # UI
-        self.center = (self.width//2, self.height//2)
+        # UI state defaults (will be recalculated in draw_table)
+        self.center = (self.width // 2, self.height // 2)
         self.table_radius = 260
         self.card_width = 80
         self.card_height = 120
-        self.deck_pos = (self.center[0], self.center[1] - self.table_radius - 40)
-        self.discard_pos = (self.center[0] + 120, self.center[1] - self.table_radius - 40)
+        self.deck_pos = (self.center[0] - int(self.table_radius * 0.15), self.center[1] - self.table_radius - 40)
+        self.discard_pos = (self.center[0] + int(self.table_radius * 0.15), self.center[1] - self.table_radius - 40)
 
-        # bốc bài
+        # user interaction bindings
         self.canvas.bind('<Button-1>', self.on_click)
+        self.canvas.bind('<Motion>', self.on_mouse_move)
+
+        # selection/hover state
+        self.selected_index = None
+        self.hover_index = None
+
+        # initial draw and AI scheduling
+        self.draw_table()
+        self.root.after(500, self.ai_turn_if_needed)
+    self.canvas.bind('<Motion>', self.on_mouse_move)
 
         # chọn lá để xem
         self.selected_index = None
@@ -127,8 +132,23 @@ class UnoGUI:
         margin = 20
         start_x = margin
         y = self.height - self.card_height/2 - 30
+        # compute spacing to center hand if many cards
+        total_w = max(0, len(player.hand)-1) * (self.card_width - 30) + self.card_width
+        start_x = max(margin, (self.width - total_w)//2)
         for i, card in enumerate(player.hand):
-            x = start_x + i * (self.card_width - 30)
+            # if hovering over an index, slightly separate neighbors
+            base_x = start_x + i * (self.card_width - 30)
+            x = base_x
+            if self.hover_index is not None and self.hover_index == i:
+                # bring hovered card slightly up (visual)
+                hy_offset = -12
+            else:
+                hy_offset = 0
+            # spread others away a bit when hovering
+            if self.hover_index is not None and self.hover_index != i:
+                # push card left or right depending on side
+                dir_sign = 1 if i > self.hover_index else -1
+                x += dir_sign * 8
             color = self.tk_color_for(card.color)
             tag = f'hand_{i}'
             self.canvas.create_rectangle(x - self.card_width/2, y - self.card_height/2,
@@ -136,11 +156,34 @@ class UnoGUI:
                                          fill=color, outline='white', tags=(tag, 'hand'))
             # hiển thị giá trị
             value_text = getattr(card, 'value', str(card))
-            self.canvas.create_text(x, y, text=value_text, fill='white', tags=(tag,))
+            self.canvas.create_text(x, y+hy_offset, text=value_text, fill='white', tags=(tag,))
             if self.selected_index == i:
                 self.canvas.create_rectangle(x - self.card_width/2 - 4, y - self.card_height/2 - 4,
                                              x + self.card_width/2 + 4, y + self.card_height/2 + 4,
                                              outline='yellow', width=3)
+
+    def on_mouse_move(self, event):
+        # update hover_index based on mouse x/y near hand area
+        margin = 20
+        hy = self.height - self.card_height/2 - 30
+        if not (hy - self.card_height/2 - 10 <= event.y <= hy + self.card_height/2 + 10):
+            if self.hover_index is not None:
+                self.hover_index = None
+                self.draw_table()
+            return
+        # compute start_x as in draw_hand
+        total_w = max(0, len(self.players[0].hand)-1) * (self.card_width - 30) + self.card_width
+        start_x = max(margin, (self.width - total_w)//2)
+        # determine index
+        idx = None
+        for i in range(len(self.players[0].hand)):
+            x = start_x + i * (self.card_width - 30)
+            if x - self.card_width/2 - 6 <= event.x <= x + self.card_width/2 + 6:
+                idx = i
+                break
+        if idx != self.hover_index:
+            self.hover_index = idx
+            self.draw_table()
 
     def on_resize(self, event):
         # chỉnh kích cỡ thu phóng cửa sổ
