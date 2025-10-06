@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 import math
 import random
-from game import Deck, Player
+from game import Deck, Player, COLORS
 
 
 class UnoGUI:
@@ -14,6 +14,9 @@ class UnoGUI:
         self.canvas = tk.Canvas(root, width=self.width, height=self.height, bg='#2b2b2b')
         self.canvas.pack(fill='both', expand=True)
 
+        # chỉnh kích cỡ cửa sổ
+        self.canvas.bind('<Configure>', self.on_resize)
+
         # Game logic
         self.deck = Deck()
         self.players = [Player(name, is_human=(i == 0)) for i, name in enumerate(player_names)]
@@ -23,7 +26,7 @@ class UnoGUI:
         self.direction = 1
         self.current = 0
 
-        # UI state
+        # UI
         self.center = (self.width//2, self.height//2)
         self.table_radius = 260
         self.card_width = 80
@@ -31,10 +34,10 @@ class UnoGUI:
         self.deck_pos = (self.center[0], self.center[1] - self.table_radius - 40)
         self.discard_pos = (self.center[0] + 120, self.center[1] - self.table_radius - 40)
 
-        # Bind deck click
+        # bốc bài
         self.canvas.bind('<Button-1>', self.on_click)
 
-        # Selected card for viewing/playing
+        # chọn lá để xem
         self.selected_index = None
 
         self.draw_table()
@@ -42,38 +45,50 @@ class UnoGUI:
 
     def draw_table(self):
         self.canvas.delete('all')
-        # draw round table
+        # chỉnh cửa sổ
+        w = max(self.canvas.winfo_width(), 200)
+        h = max(self.canvas.winfo_height(), 200)
+        self.width = w
+        self.height = h
+        self.center = (w//2, h//2)
+        self.table_radius = max(100, min(w, h)//2 - 160)
+        self.card_width = max(60, min(110, self.table_radius//3))
+        self.card_height = int(self.card_width * 1.6)
+        self.deck_pos = (self.center[0], self.center[1] - self.table_radius - 40)
+        self.discard_pos = (self.center[0] + int(self.table_radius*0.25), self.center[1] - self.table_radius - 40)
+
+        # bàn
         x, y = self.center
         self.canvas.create_oval(x - self.table_radius, y - self.table_radius,
                                 x + self.table_radius, y + self.table_radius,
                                 fill='#1e3b2b', outline='')
 
-        # draw four player areas
+        # khu vực chơi của 4 người chơi
         n = len(self.players)
         for i, player in enumerate(self.players):
             angle = (i / n) * 2 * math.pi - math.pi/2
             px = x + math.cos(angle) * (self.table_radius + 70)
             py = y + math.sin(angle) * (self.table_radius + 40)
-            # name
+            # tên
             self.canvas.create_text(px, py - 30, text=player.name, fill='white', font=('Helvetica', 12, 'bold'))
-            # card backs or count for AI
+            # rút hoặc đếm cho AI
             if player.is_human:
-                # draw hand
+                # rút
                 self.draw_hand(player)
             else:
                 self.canvas.create_rectangle(px - 30, py - 10, px + 30, py + 10, fill='#444', outline='white')
                 self.canvas.create_text(px, py, text=str(len(player.hand)), fill='white')
 
-        # draw deck and discard
+        # rút lá và huỷ
         self.draw_deck()
         self.draw_discard()
 
-        # bottom-right: card description
+        # mô tả bài
         self.draw_card_description()
 
     def draw_deck(self):
         x, y = self.deck_pos
-        # deck pile (stacked)
+        # chồng bài
         count = self.deck.count()
         for i in range(min(6, count)):
             offset = i * 1.5
@@ -83,17 +98,24 @@ class UnoGUI:
         self.canvas.create_text(x, y + self.card_height/2 + 10, text=f'Deck: {count}', fill='white')
 
     def draw_discard(self):
-        x, y = self.discard_pos
+        # show the top discarded card in the center of the table
+        x, y = self.center
         top = self.discard_pile[-1]
         color = self.tk_color_for(top.color)
-        self.canvas.create_rectangle(x - self.card_width/2, y - self.card_height/2,
-                                     x + self.card_width/2, y + self.card_height/2,
-                                     fill=color, outline='white')
-        self.canvas.create_text(x, y, text=str(top), fill='white')
-        self.canvas.create_text(x, y + self.card_height/2 + 10, text='Discard', fill='white')
+        w = int(self.card_width * 1.2)
+        h = int(self.card_height * 1.2)
+        self.canvas.create_rectangle(x - w//2, y - h//2, x + w//2, y + h//2, fill=color, outline='white', width=2)
+        # show only value/function
+        display_text = getattr(top, 'value', str(top))
+        self.canvas.create_text(x, y, text=display_text, fill='white', font=('Helvetica', 14, 'bold'))
+        if top.color is not None and display_text in ('Wild', 'Wild Draw Four'):
+            # show chosen color name below the card
+            self.canvas.create_text(x, y + h//2 + 12, text=f'Color: {top.color}', fill='white')
+        else:
+            self.canvas.create_text(x, y + h//2 + 12, text='Discard', fill='white')
 
     def draw_hand(self, player):
-        # draw human player's hand at bottom
+        # rút bài
         margin = 20
         start_x = margin
         y = self.height - self.card_height/2 - 30
@@ -104,11 +126,23 @@ class UnoGUI:
             self.canvas.create_rectangle(x - self.card_width/2, y - self.card_height/2,
                                          x + self.card_width/2, y + self.card_height/2,
                                          fill=color, outline='white', tags=(tag, 'hand'))
-            self.canvas.create_text(x, y, text=str(card), fill='white', tags=(tag,))
+            # hiển thị giá trị
+            value_text = getattr(card, 'value', str(card))
+            self.canvas.create_text(x, y, text=value_text, fill='white', tags=(tag,))
             if self.selected_index == i:
                 self.canvas.create_rectangle(x - self.card_width/2 - 4, y - self.card_height/2 - 4,
                                              x + self.card_width/2 + 4, y + self.card_height/2 + 4,
                                              outline='yellow', width=3)
+
+    def on_resize(self, event):
+        # chỉnh kích cỡ thu phóng cửa sổ
+        try:
+            self.width = event.width
+            self.height = event.height
+        except Exception:
+            self.width = max(self.canvas.winfo_width(), self.width)
+            self.height = max(self.canvas.winfo_height(), self.height)
+        self.draw_table()
 
     def draw_card_description(self):
         # panel
@@ -153,14 +187,14 @@ class UnoGUI:
 
     def on_click(self, event):
         x, y = event.x, event.y
-        # check deck
+        # kiểm tra bộ 
         dx, dy = self.deck_pos
         if abs(x - dx) < 60 and abs(y - dy) < 80:
             self.player_draw()
             return
 
-        # check hand cards
-        # approximate positions used in draw_hand
+        # kiểm tra bài trên tay
+        # tối ưu hoá vị trí vẽ bài
         margin = 20
         start_x = margin
         hy = self.height - self.card_height/2 - 30
@@ -175,15 +209,42 @@ class UnoGUI:
                     self.draw_table()
                 return
 
+    def ask_color_choice(self):
+        # modal dialog to choose a color for Wild cards
+        dlg = tk.Toplevel(self.root)
+        dlg.title('Choose color')
+        dlg.transient(self.root)
+        dlg.grab_set()
+        choice = {'color': None}
+
+        def pick(c):
+            choice['color'] = c
+            dlg.destroy()
+
+        tk.Label(dlg, text='Choose color for Wild:', font=('Helvetica', 12)).pack(padx=10, pady=8)
+        frm = tk.Frame(dlg)
+        frm.pack(padx=10, pady=8)
+        for c in COLORS:
+            b = tk.Button(frm, text=c, bg=self.tk_color_for(c), command=lambda cc=c: pick(cc), width=10)
+            b.pack(side='left', padx=4)
+
+        self.root.wait_window(dlg)
+        return choice['color']
+
     def attempt_play(self, index):
         player = self.players[0]
         card = player.hand[index]
         top = self.discard_pile[-1]
         if (card.color == top.color or card.value == top.value or card.color is None):
             played = player.hand.pop(index)
+            # if human plays a wild, ask for color
+            if played.color is None and played.value in ('Wild', 'Wild Draw Four') and player.is_human:
+                chosen = self.ask_color_choice()
+                if chosen:
+                    played.color = chosen
             self.discard_pile.append(played)
             self.selected_index = None
-            # effect handling (simplified)
+            # hiệu ứng
             if played.value == 'Reverse':
                 self.direction *= -1
             elif played.value == 'Skip':
@@ -222,15 +283,18 @@ class UnoGUI:
         self.current = (self.current + self.direction) % len(self.players)
 
     def ai_turn_if_needed(self):
-        # if current player is AI, make a move
+        # nếu người chơi hiện tại là AI
         if self.players[self.current].is_human:
             return
         player = self.players[self.current]
         top = self.discard_pile[-1]
         card = player.play(top)
         if card:
+            # if AI plays a wild, pick a random color for it
+            if card.color is None and card.value in ('Wild', 'Wild Draw Four'):
+                card.color = random.choice(COLORS)
             self.discard_pile.append(card)
-            # simple effects
+            # hiệu ứng đơn giản
             if card.value == 'Reverse':
                 self.direction *= -1
             elif card.value == 'Skip':
@@ -252,7 +316,7 @@ class UnoGUI:
             player.draw(self.deck)
         self.next_player()
         self.draw_table()
-        # schedule next AI move if needed
+        # thiết lập nước đi của AI 
         self.root.after(600, self.ai_turn_if_needed)
 
     def reshuffle_discard_into_deck(self):
