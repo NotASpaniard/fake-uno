@@ -1,6 +1,10 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 import math
+import random
+from game import Deck, Player, COLORS
+
+class UnoGUI:
     def __init__(self, root, player_names):
         self.root = root
         self.root.title('UNO - Round Table')
@@ -26,8 +30,14 @@ import math
         self.table_radius = 260
         self.card_width = 80
         self.card_height = 120
-        self.deck_pos = (self.center[0] - int(self.table_radius * 0.15), self.center[1] - self.table_radius - 40)
-        self.discard_pos = (self.center[0] + int(self.table_radius * 0.15), self.center[1] - self.table_radius - 40)
+        # place deck near the top-left edge of the table circle
+        self.deck_pos = (self.center[0] - int(self.table_radius * 0.6), self.center[1] - int(self.table_radius * 0.85))
+        # discard sits near top-center of the table
+        self.discard_pos = (self.center[0], self.center[1] - self.table_radius - 40)
+        # cache player area centers (bottom human, left bot, top bot, right bot)
+        self.player_positions = []
+        # avatar images (tk.PhotoImage) keyed by player index
+        self.avatar_images = {}
 
         # user interaction bindings
         self.canvas.bind('<Button-1>', self.on_click)
@@ -40,13 +50,6 @@ import math
         # initial draw and AI scheduling
         self.draw_table()
         self.root.after(500, self.ai_turn_if_needed)
-    self.canvas.bind('<Motion>', self.on_mouse_move)
-
-        # chọn lá để xem
-        self.selected_index = None
-
-        self.draw_table()
-        self.root.after(500, self.ai_turn_if_needed)
 
     def draw_table(self):
         self.canvas.delete('all')
@@ -56,11 +59,14 @@ import math
         self.width = w
         self.height = h
         self.center = (w//2, h//2)
+        # make the table a bit smaller so avatars/labels don't get clipped
         self.table_radius = max(100, min(w, h)//2 - 160)
         self.card_width = max(60, min(110, self.table_radius//3))
         self.card_height = int(self.card_width * 1.6)
-        self.deck_pos = (self.center[0], self.center[1] - self.table_radius - 40)
-        self.discard_pos = (self.center[0] + int(self.table_radius*0.25), self.center[1] - self.table_radius - 40)
+        # recompute deck to stick to bottom-right corner of the canvas (inside margin)
+        margin = 24
+        self.deck_pos = (self.width - margin - self.card_width//2, self.height - margin - self.card_height//2)
+        self.discard_pos = (self.center[0], self.center[1] - self.table_radius - 40)
 
         # bàn
         x, y = self.center
@@ -68,24 +74,43 @@ import math
                                 x + self.table_radius, y + self.table_radius,
                                 fill='#1e3b2b', outline='')
 
-        # khu vực chơi của 4 người chơi
-        n = len(self.players)
+        # fixed player positions (bottom human, left bot, top bot, right bot)
+        # ensure we have four players
+        while len(self.players) < 4:
+            self.players.append(Player(f'Bot {len(self.players)+1}'))
+        pp_bottom = (x, y + self.table_radius + 60)
+        pp_left = (x - self.table_radius - 90, y)
+        pp_top = (x, y - self.table_radius - 60)
+        pp_right = (x + self.table_radius + 90, y)
+        self.player_positions = [pp_bottom, pp_left, pp_top, pp_right]
+        avatar_w, avatar_h = 110, 48
         for i, player in enumerate(self.players):
-            angle = (i / n) * 2 * math.pi - math.pi/2
-            px = x + math.cos(angle) * (self.table_radius + 70)
-            py = y + math.sin(angle) * (self.table_radius + 40)
-            # tên
-            self.canvas.create_text(px, py - 30, text=player.name, fill='white', font=('Helvetica', 12, 'bold'))
-            # highlight current player with yellow ring
-            if i == self.current:
-                self.canvas.create_oval(px - 44, py - 54, px + 44, py + 6, outline='yellow', width=3)
-            # rút hoặc đếm cho AI
-            if player.is_human:
-                # rút
-                self.draw_hand(player)
+            px, py = self.player_positions[i]
+            # clamp so avatars stay visible inside canvas
+            margin = 12
+            px = max(margin + avatar_w//2, min(self.width - margin - avatar_w//2, px))
+            py = max(margin + avatar_h//2, min(self.height - margin - avatar_h//2, py))
+            # avatar frame (clickable)
+            self.canvas.create_rectangle(px - avatar_w//2, py - avatar_h//2, px + avatar_w//2, py + avatar_h//2,
+                                         fill='#222', outline='white', tags=(f'avatar_{i}',))
+            # draw avatar image if set, otherwise placeholder text
+            img = self.avatar_images.get(i)
+            if img:
+                # image is centered on avatar
+                self.canvas.create_image(px, py, image=img, tags=(f'avatar_img_{i}',))
             else:
-                self.canvas.create_rectangle(px - 30, py - 10, px + 30, py + 10, fill='#444', outline='white')
-                self.canvas.create_text(px, py, text=str(len(player.hand)), fill='white')
+                # placeholder: small inner rect and 'No Img' label
+                self.canvas.create_rectangle(px - 28, py - 14, px + 28, py + 14, fill='#121212', outline='white')
+                self.canvas.create_text(px, py, text='No Img', fill='white', font=('Helvetica', 9), tags=(f'avatar_{i}',))
+            # name label
+            self.canvas.create_text(px, py - avatar_h//2 - 8, text=player.name, fill='white', font=('Helvetica', 11, 'bold'), tags=(f'avatar_{i}',))
+            # card count for bots
+            if not player.is_human:
+                self.canvas.create_text(px, py + avatar_h//2 + 6, text=f'Cards: {len(player.hand)}', fill='white', tags=(f'avatar_{i}',))
+            # highlight current player
+            if i == self.current:
+                self.canvas.create_oval(px - avatar_w//2 - 6, py - avatar_h//2 - 6, px + avatar_w//2 + 6, py + avatar_h//2 + 6,
+                                       outline='yellow', width=3)
 
         # rút lá và huỷ
         self.draw_deck()
@@ -93,6 +118,12 @@ import math
 
         # mô tả bài
         self.draw_card_description()
+
+        # draw human hand at bottom each frame
+        try:
+            self.draw_hand(self.players[0])
+        except Exception:
+            pass
 
     def draw_deck(self):
         x, y = self.deck_pos
@@ -211,6 +242,15 @@ import math
         else:
             self.canvas.create_text(x + 10, y + 40, anchor='nw', text='Select a card to see details', fill='white')
 
+    def get_human_card_pos(self, index):
+        # compute current human hand card center position for given index
+        margin = 20
+        total_w = max(0, len(self.players[0].hand)-1) * (self.card_width - 30) + self.card_width
+        start_x = max(margin, (self.width - total_w)//2)
+        x = start_x + index * (self.card_width - 30)
+        y = self.height - self.card_height/2 - 30
+        return (x, y)
+
     def tk_color_for(self, color):
         if color == 'Pink':
             return '#ff77aa'
@@ -238,7 +278,15 @@ import math
 
     def on_click(self, event):
         x, y = event.x, event.y
-        # kiểm tra bộ 
+        # check avatar clicks (rename individual player)
+        for i in range(len(self.players)):
+            bbox = self.canvas.bbox(f'avatar_{i}')
+            if bbox and bbox[0] <= x <= bbox[2] and bbox[1] <= y <= bbox[3]:
+                # set target and open rename dialog for that single player
+                self._rename_target = i
+                self.open_rename_dialog()
+                return
+        # check deck
         dx, dy = self.deck_pos
         if abs(x - dx) < 60 and abs(y - dy) < 80:
             # clicking deck - animate draw from deck to hand
@@ -365,11 +413,7 @@ import math
 
     def animate_play_from_hand(self, hand_index):
         # compute hand card pos
-        margin = 20
-        start_x = margin
-        hy = self.height - self.card_height/2 - 30
-        sx = start_x + hand_index * (self.card_width - 30)
-        sy = hy
+        sx, sy = self.get_human_card_pos(hand_index)
         tx, ty = self.center
         player = self.players[0]
         if hand_index < len(player.hand):
@@ -385,33 +429,77 @@ import math
 
     def animate_draw_from_deck(self, to_hand_index=None):
         sx, sy = self.deck_pos
-        # destination: approximate end of hand (if to_hand_index given) else center-bottom
-        margin = 20
+        # destination: position of the human hand slot
+        player = self.players[0]
         if to_hand_index is None:
-            dx = margin + 0 * (self.card_width - 30)
+            to_index = len(player.hand)
         else:
-            dx = margin + to_hand_index * (self.card_width - 30)
-        dy = self.height - self.card_height/2 - 30
+            to_index = to_hand_index
+        dx, dy = self.get_human_card_pos(to_index)
         self.animate_move((sx, sy), (dx, dy), color='#222', text='?', callback=None)
 
     def open_rename_dialog(self):
-        dlg = tk.Toplevel(self.root)
-        dlg.title('Rename players')
-        dlg.transient(self.root)
-        dlg.grab_set()
-        entries = []
-        for i, p in enumerate(self.players):
-            tk.Label(dlg, text=f'Player {i+1}:').grid(row=i, column=0, padx=6, pady=6)
+        # legacy support: if called with player_index, rename single player
+        def _open_all():
+            dlg = tk.Toplevel(self.root)
+            dlg.title('Rename players')
+            dlg.transient(self.root)
+            dlg.grab_set()
+            entries = []
+            for i, p in enumerate(self.players):
+                tk.Label(dlg, text=f'Player {i+1}:').grid(row=i, column=0, padx=6, pady=6)
+                e = tk.Entry(dlg)
+                e.insert(0, p.name)
+                e.grid(row=i, column=1, padx=6, pady=6)
+                entries.append(e)
+            def apply_names():
+                for i, e in enumerate(entries):
+                    self.players[i].name = e.get() or self.players[i].name
+                dlg.destroy()
+                self.draw_table()
+            tk.Button(dlg, text='Apply', command=apply_names).grid(row=len(entries), column=0, columnspan=2, pady=8)
+
+        # allow external callers to pass player_index
+        import inspect
+        caller_args = inspect.getfullargspec(self.open_rename_dialog).args
+        # We'll implement a simpler API: if caller passed player_index via attribute
+        if hasattr(self, '_rename_target') and isinstance(self._rename_target, int):
+            i = self._rename_target
+            dlg = tk.Toplevel(self.root)
+            dlg.title(f'Rename {self.players[i].name}')
+            dlg.transient(self.root)
+            dlg.grab_set()
+            tk.Label(dlg, text=f'New name for {self.players[i].name}:').grid(row=0, column=0, padx=6, pady=6)
             e = tk.Entry(dlg)
-            e.insert(0, p.name)
-            e.grid(row=i, column=1, padx=6, pady=6)
-            entries.append(e)
-        def apply_names():
-            for i, e in enumerate(entries):
+            e.insert(0, self.players[i].name)
+            e.grid(row=0, column=1, padx=6, pady=6)
+            def apply_one():
                 self.players[i].name = e.get() or self.players[i].name
-            dlg.destroy()
-            self.draw_table()
-        tk.Button(dlg, text='Apply', command=apply_names).grid(row=len(entries), column=0, columnspan=2, pady=8)
+                dlg.destroy()
+                delattr(self, '_rename_target')
+                self.draw_table()
+            def set_avatar():
+                path = filedialog.askopenfilename(title='Select avatar image', filetypes=[('Images','*.png *.gif *.ppm *.pgm')])
+                if not path:
+                    return
+                try:
+                    img = tk.PhotoImage(file=path)
+                    # subsample large images so they fit avatar area
+                    max_w, max_h = 100, 80
+                    fw = max(1, img.width() // max_w)
+                    fh = max(1, img.height() // max_h)
+                    factor = max(fw, fh)
+                    if factor > 1:
+                        img = img.subsample(factor, factor)
+                    self.avatar_images[i] = img
+                    self.draw_table()
+                except Exception as ex:
+                    messagebox.showerror('Image error', f'Could not load image: {ex}')
+
+            tk.Button(dlg, text='Apply', command=apply_one).grid(row=1, column=0, pady=8)
+            tk.Button(dlg, text='Set Avatar', command=set_avatar).grid(row=1, column=1, pady=8)
+        else:
+            _open_all()
 
     def next_player(self):
         self.current = (self.current + self.direction) % len(self.players)
