@@ -71,6 +71,9 @@ class UnoGUI:
             py = y + math.sin(angle) * (self.table_radius + 40)
             # tên
             self.canvas.create_text(px, py - 30, text=player.name, fill='white', font=('Helvetica', 12, 'bold'))
+            # highlight current player with yellow ring
+            if i == self.current:
+                self.canvas.create_oval(px - 44, py - 54, px + 44, py + 6, outline='yellow', width=3)
             # rút hoặc đếm cho AI
             if player.is_human:
                 # rút
@@ -96,6 +99,11 @@ class UnoGUI:
                                          x + self.card_width/2 + offset, y + self.card_height/2 + offset,
                                          fill='#222', outline='white', tags=('deck',))
         self.canvas.create_text(x, y + self.card_height/2 + 10, text=f'Deck: {count}', fill='white')
+        # rename button near deck
+        bx = x - 40
+        by = y + self.card_height/2 + 30
+        self.canvas.create_rectangle(bx-2, by-12, bx+82, by+12, fill='#333', outline='white', tags=('rename_btn',))
+        self.canvas.create_text(bx+40, by, text='Rename', fill='white', tags=('rename_btn',))
 
     def draw_discard(self):
         # show the top discarded card in the center of the table
@@ -190,7 +198,8 @@ class UnoGUI:
         # kiểm tra bộ 
         dx, dy = self.deck_pos
         if abs(x - dx) < 60 and abs(y - dy) < 80:
-            self.player_draw()
+            # clicking deck - animate draw from deck to hand
+            self.animate_draw_from_deck()
             return
 
         # kiểm tra bài trên tay
@@ -203,10 +212,19 @@ class UnoGUI:
             if hx - self.card_width/2 < x < hx + self.card_width/2 and hy - self.card_height/2 < y < hy + self.card_height/2:
                 # select or play
                 if self.selected_index == i:
-                    self.attempt_play(i)
+                    # animate playing from hand to center then apply play
+                    self.animate_play_from_hand(i)
                 else:
                     self.selected_index = i
                     self.draw_table()
+                return
+
+        # check rename button
+        items = self.canvas.find_withtag('rename_btn')
+        for it in items:
+            bbox = self.canvas.bbox(it)
+            if bbox and bbox[0] <= event.x <= bbox[2] and bbox[1] <= event.y <= bbox[3]:
+                self.open_rename_dialog()
                 return
 
     def ask_color_choice(self):
@@ -273,11 +291,84 @@ class UnoGUI:
             self.reshuffle_discard_into_deck()
         card = self.deck.draw()
         if card:
+            # animate deck->hand then add
+            self.animate_draw_from_deck(to_hand_index=len(player.hand))
             player.hand.append(card)
             self.selected_index = len(player.hand) - 1
             self.draw_table()
         else:
             messagebox.showinfo('Deck empty', 'No cards to draw.')
+
+    def animate_move(self, src, dst, color='#fff', text='', steps=12, callback=None):
+        # src/dst are (x,y) centers. Draw a temporary rect and move it.
+        sx, sy = src
+        dx, dy = dst
+        rect = self.canvas.create_rectangle(sx-20, sy-30, sx+20, sy+30, fill=color, outline='white')
+        label = self.canvas.create_text(sx, sy, text=text, fill='white')
+        def step(i):
+            t = (i+1)/steps
+            nx = sx + (dx-sx)*t
+            ny = sy + (dy-sy)*t
+            self.canvas.coords(rect, nx-20, ny-30, nx+20, ny+30)
+            self.canvas.coords(label, nx, ny)
+            if i+1 < steps:
+                self.root.after(16, lambda: step(i+1))
+            else:
+                self.canvas.delete(rect)
+                self.canvas.delete(label)
+                if callback:
+                    callback()
+        step(0)
+
+    def animate_play_from_hand(self, hand_index):
+        # compute hand card pos
+        margin = 20
+        start_x = margin
+        hy = self.height - self.card_height/2 - 30
+        sx = start_x + hand_index * (self.card_width - 30)
+        sy = hy
+        tx, ty = self.center
+        player = self.players[0]
+        if hand_index < len(player.hand):
+            card = player.hand[hand_index]
+            text = getattr(card, 'value', str(card))
+            color = self.tk_color_for(card.color)
+            # after animation, actually play
+            def after():
+                # ensure index is valid (player may have drawn in meantime)
+                if hand_index < len(self.players[0].hand):
+                    self.attempt_play(hand_index)
+            self.animate_move((sx, sy), (tx, ty), color=color, text=text, callback=after)
+
+    def animate_draw_from_deck(self, to_hand_index=None):
+        sx, sy = self.deck_pos
+        # destination: approximate end of hand (if to_hand_index given) else center-bottom
+        margin = 20
+        if to_hand_index is None:
+            dx = margin + 0 * (self.card_width - 30)
+        else:
+            dx = margin + to_hand_index * (self.card_width - 30)
+        dy = self.height - self.card_height/2 - 30
+        self.animate_move((sx, sy), (dx, dy), color='#222', text='?', callback=None)
+
+    def open_rename_dialog(self):
+        dlg = tk.Toplevel(self.root)
+        dlg.title('Rename players')
+        dlg.transient(self.root)
+        dlg.grab_set()
+        entries = []
+        for i, p in enumerate(self.players):
+            tk.Label(dlg, text=f'Player {i+1}:').grid(row=i, column=0, padx=6, pady=6)
+            e = tk.Entry(dlg)
+            e.insert(0, p.name)
+            e.grid(row=i, column=1, padx=6, pady=6)
+            entries.append(e)
+        def apply_names():
+            for i, e in enumerate(entries):
+                self.players[i].name = e.get() or self.players[i].name
+            dlg.destroy()
+            self.draw_table()
+        tk.Button(dlg, text='Apply', command=apply_names).grid(row=len(entries), column=0, columnspan=2, pady=8)
 
     def next_player(self):
         self.current = (self.current + self.direction) % len(self.players)
