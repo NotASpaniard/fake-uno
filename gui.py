@@ -24,6 +24,9 @@ class UnoGUI:
         self.discard_pile = [self.deck.draw()]
         self.direction = 1
         self.current = 0
+        # UNO state
+        self.human_uno_called = False
+        self.pending_uno_penalty_index = None
 
         # UI state defaults (will be recalculated in draw_table)
         self.center = (self.width // 2, self.height // 2)
@@ -119,6 +122,15 @@ class UnoGUI:
         # mô tả bài
         self.draw_card_description()
 
+        # thông tin lượt và chiều
+        try:
+            arrow = '↻' if self.direction == 1 else '↺'
+            turn_text = f"Turn: {self.players[self.current].name}  {arrow}"
+            self.canvas.create_text(self.center[0], self.center[1] + self.table_radius + 28,
+                                    text=turn_text, fill='white', font=('Helvetica', 12, 'bold'))
+        except Exception:
+            pass
+
         # draw human hand at bottom each frame
         try:
             self.draw_hand(self.players[0])
@@ -141,6 +153,13 @@ class UnoGUI:
         self.canvas.create_rectangle(bx-2, by-12, bx+82, by+12, fill='#333', outline='white', tags=('rename_btn',))
         self.canvas.create_text(bx+40, by, text='Rename', fill='white', tags=('rename_btn',))
 
+        # UNO button
+        ubx = bx
+        uby = by + 30
+        uno_fill = '#2d5' if self.human_uno_called else '#333'
+        self.canvas.create_rectangle(ubx-2, uby-12, ubx+82, uby+12, fill=uno_fill, outline='white', tags=('uno_btn',))
+        self.canvas.create_text(ubx+40, uby, text='UNO!', fill='white', tags=('uno_btn',))
+
     def draw_discard(self):
         # show the top discarded card in the center of the table
         x, y = self.center
@@ -148,10 +167,12 @@ class UnoGUI:
         color = self.tk_color_for(top.color)
         w = int(self.card_width * 1.2)
         h = int(self.card_height * 1.2)
-        self.canvas.create_rectangle(x - w//2, y - h//2, x + w//2, y + h//2, fill=color, outline='white', width=2)
+        # card shape with rounded corners look: layered rectangles
+        self.canvas.create_rectangle(x - w//2, y - h//2, x + w//2, y + h//2, fill='#111', outline='white', width=1)
+        self.canvas.create_rectangle(x - w//2 + 4, y - h//2 + 4, x + w//2 - 4, y + h//2 - 4, fill=color, outline='white', width=2)
         # show only value/function
         display_text = getattr(top, 'value', str(top))
-        self.canvas.create_text(x, y, text=display_text, fill='white', font=('Helvetica', 14, 'bold'))
+        self.canvas.create_text(x, y, text=display_text, fill='white', font=('Helvetica', 16, 'bold'))
         if top.color is not None and display_text in ('Wild', 'Wild Draw Four'):
             # show chosen color name below the card
             self.canvas.create_text(x, y + h//2 + 12, text=f'Color: {top.color}', fill='white')
@@ -166,6 +187,8 @@ class UnoGUI:
         # compute spacing to center hand if many cards
         total_w = max(0, len(player.hand)-1) * (self.card_width - 30) + self.card_width
         start_x = max(margin, (self.width - total_w)//2)
+        top = self.discard_pile[-1]
+        is_human_turn = (self.players[self.current].is_human if self.players else False)
         for i, card in enumerate(player.hand):
             # if hovering over an index, slightly separate neighbors
             base_x = start_x + i * (self.card_width - 30)
@@ -182,12 +205,24 @@ class UnoGUI:
                 x += dir_sign * 8
             color = self.tk_color_for(card.color)
             tag = f'hand_{i}'
+            # layered look for each card
             self.canvas.create_rectangle(x - self.card_width/2, y - self.card_height/2,
                                          x + self.card_width/2, y + self.card_height/2,
+                                         fill='#111', outline='white', tags=(tag, 'hand'))
+            self.canvas.create_rectangle(x - self.card_width/2 + 3, y - self.card_height/2 + 3,
+                                         x + self.card_width/2 - 3, y + self.card_height/2 - 3,
                                          fill=color, outline='white', tags=(tag, 'hand'))
             # hiển thị giá trị
             value_text = getattr(card, 'value', str(card))
-            self.canvas.create_text(x, y+hy_offset, text=value_text, fill='white', tags=(tag,))
+            self.canvas.create_text(x, y+hy_offset, text=value_text, fill='white', font=('Helvetica', 12, 'bold'), tags=(tag,))
+            # highlight lá hợp lệ nếu là lượt của người chơi
+            playable = (card.color == getattr(top, 'color', None) or
+                        getattr(card, 'value', None) == getattr(top, 'value', None) or
+                        getattr(card, 'color', None) is None)
+            if is_human_turn and playable:
+                self.canvas.create_rectangle(x - self.card_width/2 - 3, y - self.card_height/2 - 3,
+                                             x + self.card_width/2 + 3, y + self.card_height/2 + 3,
+                                             outline='#00e0ff', width=2)
             if self.selected_index == i:
                 self.canvas.create_rectangle(x - self.card_width/2 - 4, y - self.card_height/2 - 4,
                                              x + self.card_width/2 + 4, y + self.card_height/2 + 4,
@@ -252,15 +287,16 @@ class UnoGUI:
         return (x, y)
 
     def tk_color_for(self, color):
-        if color == 'Pink':
-            return '#ff77aa'
-        if color == 'Black':
-            return '#222222'
-        if color == 'Teal':
-            return '#00b3b3'
+        if color == 'Red':
+            return '#d64545'
+        if color == 'Yellow':
+            return '#e7c000'
         if color == 'Green':
             return '#22bb33'
-        return '#666'
+        if color == 'Blue':
+            return '#2472c8'
+        # back of card / unknown
+        return '#444'
 
     def describe_card(self, card):
         if card.color is None:
@@ -289,22 +325,26 @@ class UnoGUI:
         # check deck
         dx, dy = self.deck_pos
         if abs(x - dx) < 60 and abs(y - dy) < 80:
-            # clicking deck - animate draw from deck to hand
-            self.animate_draw_from_deck()
+            # chỉ rút khi đến lượt người chơi
+            if self.players[self.current].is_human:
+                self.player_draw()
             return
 
         # kiểm tra bài trên tay
-        # tối ưu hoá vị trí vẽ bài
+        # tính toán vị trí giống draw_hand để bắt chuẩn xác
         margin = 20
-        start_x = margin
+        total_w = max(0, len(self.players[0].hand)-1) * (self.card_width - 30) + self.card_width
+        start_x = max(margin, (self.width - total_w)//2)
         hy = self.height - self.card_height/2 - 30
         for i, card in enumerate(self.players[0].hand):
             hx = start_x + i * (self.card_width - 30)
             if hx - self.card_width/2 < x < hx + self.card_width/2 and hy - self.card_height/2 < y < hy + self.card_height/2:
                 # select or play
                 if self.selected_index == i:
-                    # animate playing from hand to center then apply play
-                    self.animate_play_from_hand(i)
+                    # chỉ được đánh khi đến lượt người chơi
+                    if self.players[self.current].is_human:
+                        # animate playing from hand to center then apply play
+                        self.animate_play_from_hand(i)
                 else:
                     self.selected_index = i
                     self.draw_table()
@@ -316,6 +356,18 @@ class UnoGUI:
             bbox = self.canvas.bbox(it)
             if bbox and bbox[0] <= event.x <= bbox[2] and bbox[1] <= event.y <= bbox[3]:
                 self.open_rename_dialog()
+                return
+
+        # check UNO button
+        items = self.canvas.find_withtag('uno_btn')
+        for it in items:
+            bbox = self.canvas.bbox(it)
+            if bbox and bbox[0] <= event.x <= bbox[2] and bbox[1] <= event.y <= bbox[3]:
+                # người chơi tuyên bố UNO (sẽ có hiệu lực khi còn 1 lá)
+                if self.players[self.current].is_human:
+                    self.human_uno_called = True
+                    self.draw_table()
+                    messagebox.showinfo('UNO', 'Bạn đã sẵn sàng hô UNO!')
                 return
 
     def ask_color_choice(self):
@@ -365,8 +417,18 @@ class UnoGUI:
                 self.next_player()
                 self.players[self.current].draw(self.deck, 4)
 
+            # xử lý UNO: người chơi cần nhấn nút trước khi kết thúc lượt
             if player.has_uno():
-                messagebox.showinfo('UNO', f'{player.name} says UNO!')
+                if player.is_human:
+                    if self.human_uno_called:
+                        messagebox.showinfo('UNO', f'{player.name} says UNO!')
+                        self.human_uno_called = False
+                        self.pending_uno_penalty_index = None
+                    else:
+                        # sẽ bị phạt +2 khi tới lượt kế tiếp bắt đầu
+                        self.pending_uno_penalty_index = 0
+                else:
+                    messagebox.showinfo('UNO', f'{player.name} says UNO!')
             if player.is_winner():
                 messagebox.showinfo('Winner', f'{player.name} wins!')
                 self.root.quit()
@@ -385,7 +447,20 @@ class UnoGUI:
             # animate deck->hand then add
             self.animate_draw_from_deck(to_hand_index=len(player.hand))
             player.hand.append(card)
-            self.selected_index = len(player.hand) - 1
+            # nếu lá rút đánh được, tự động chọn để người chơi có thể click chơi ngay
+            top = self.discard_pile[-1]
+            if (card.color == getattr(top, 'color', None) or
+                getattr(card, 'value', None) == getattr(top, 'value', None) or
+                getattr(card, 'color', None) is None):
+                self.selected_index = len(player.hand) - 1
+                # người chơi có thể bấm để đánh; chưa kết thúc lượt
+            else:
+                self.selected_index = None
+                # không đánh được -> kết thúc lượt ngay
+                self.draw_table()
+                self.next_player()
+                self.root.after(600, self.ai_turn_if_needed)
+                return
             self.draw_table()
         else:
             messagebox.showinfo('Deck empty', 'No cards to draw.')
@@ -504,7 +579,27 @@ class UnoGUI:
     def next_player(self):
         self.current = (self.current + self.direction) % len(self.players)
 
+    def apply_uno_penalty_if_pending(self):
+        # áp dụng phạt +2 nếu người chơi quên hô UNO
+        if self.pending_uno_penalty_index is None:
+            return
+        idx = self.pending_uno_penalty_index
+        # đảm bảo có đủ bài để rút
+        if self.deck.count() < 2:
+            self.reshuffle_discard_into_deck()
+        # rút 2 lá cho người bị phạt
+        self.players[idx].draw(self.deck, 2)
+        try:
+            messagebox.showinfo('UNO penalty', f"{self.players[idx].name} quên hô UNO: +2")
+        except Exception:
+            pass
+        self.pending_uno_penalty_index = None
+        if idx == 0:
+            self.human_uno_called = False
+
     def ai_turn_if_needed(self):
+        # áp dụng phạt UNO (nếu có) trước khi người kế tiếp hành động
+        self.apply_uno_penalty_if_pending()
         # nếu người chơi hiện tại là AI
         if self.players[self.current].is_human:
             return
@@ -533,9 +628,38 @@ class UnoGUI:
                 messagebox.showinfo('Winner', f'{player.name} wins!')
                 self.root.quit()
         else:
+            # không có lá hợp lệ, rút 1 lá và chơi nếu có thể
             if self.deck.count() == 0:
                 self.reshuffle_discard_into_deck()
-            player.draw(self.deck)
+            drawn = self.deck.draw()
+            if drawn is not None:
+                # nếu wild, sẽ chọn màu khi chơi
+                can_play = (drawn.color == top.color or drawn.value == top.value or drawn.color is None)
+                if can_play:
+                    if drawn.color is None and drawn.value in ('Wild', 'Wild Draw Four'):
+                        drawn.color = random.choice(COLORS)
+                    self.discard_pile.append(drawn)
+                    if drawn.value == 'Reverse':
+                        self.direction *= -1
+                    elif drawn.value == 'Skip':
+                        self.next_player()
+                    elif drawn.value == 'Draw Two':
+                        self.next_player()
+                        self.players[self.current].draw(self.deck, 2)
+                    elif drawn.value == 'Wild Draw Four':
+                        self.next_player()
+                        self.players[self.current].draw(self.deck, 4)
+                    if player.has_uno():
+                        print(f'{player.name} says UNO!')
+                    if player.is_winner():
+                        messagebox.showinfo('Winner', f'{player.name} wins!')
+                        self.root.quit()
+                else:
+                    # không chơi được -> thêm vào tay
+                    player.hand.append(drawn)
+            else:
+                # không còn bài để rút
+                pass
         self.next_player()
         self.draw_table()
         # thiết lập nước đi của AI 
