@@ -45,6 +45,7 @@ class UnoGUI:
         # user interaction bindings
         self.canvas.bind('<Button-1>', self.on_click)
         self.canvas.bind('<Motion>', self.on_mouse_move)
+        self.canvas.bind('<Double-Button-1>', self.on_double_click)
 
         # selection/hover state
         self.selected_index = None
@@ -61,7 +62,8 @@ class UnoGUI:
         h = max(self.canvas.winfo_height(), 200)
         self.width = w
         self.height = h
-        self.center = (w//2, h//2)
+        # đẩy bàn chơi lên trên để các avatar và tay bài không bị che
+        self.center = (w//2, max(140, h//2 - 60))
         # make the table a bit smaller so avatars/labels don't get clipped
         self.table_radius = max(100, min(w, h)//2 - 160)
         self.card_width = max(60, min(110, self.table_radius//3))
@@ -134,6 +136,12 @@ class UnoGUI:
         # draw human hand at bottom each frame
         try:
             self.draw_hand(self.players[0])
+            # đảm bảo avatar và điều khiển nổi trên tay bài
+            for i in range(len(self.players)):
+                self.canvas.tag_raise(f'avatar_{i}')
+                self.canvas.tag_raise(f'avatar_img_{i}')
+            self.canvas.tag_raise('rename_btn')
+            self.canvas.tag_raise('uno_btn')
         except Exception:
             pass
 
@@ -170,14 +178,11 @@ class UnoGUI:
         # card shape with rounded corners look: layered rectangles
         self.canvas.create_rectangle(x - w//2, y - h//2, x + w//2, y + h//2, fill='#111', outline='white', width=1)
         self.canvas.create_rectangle(x - w//2 + 4, y - h//2 + 4, x + w//2 - 4, y + h//2 - 4, fill=color, outline='white', width=2)
-        # show only value/function
+        # show only value/function + color label
         display_text = getattr(top, 'value', str(top))
         self.canvas.create_text(x, y, text=display_text, fill='white', font=('Helvetica', 16, 'bold'))
-        if top.color is not None and display_text in ('Wild', 'Wild Draw Four'):
-            # show chosen color name below the card
-            self.canvas.create_text(x, y + h//2 + 12, text=f'Color: {top.color}', fill='white')
-        else:
-            self.canvas.create_text(x, y + h//2 + 12, text='Discard', fill='white')
+        color_label = 'Any' if getattr(top, 'color', None) is None else top.color
+        self.canvas.create_text(x, y + h//2 + 12, text=f'Color: {color_label}', fill='white')
 
     def draw_hand(self, player):
         # rút bài
@@ -212,9 +217,11 @@ class UnoGUI:
             self.canvas.create_rectangle(x - self.card_width/2 + 3, y - self.card_height/2 + 3,
                                          x + self.card_width/2 - 3, y + self.card_height/2 - 3,
                                          fill=color, outline='white', tags=(tag, 'hand'))
-            # hiển thị giá trị
+            # hiển thị giá trị và nhãn màu
             value_text = getattr(card, 'value', str(card))
-            self.canvas.create_text(x, y+hy_offset, text=value_text, fill='white', font=('Helvetica', 12, 'bold'), tags=(tag,))
+            self.canvas.create_text(x, y+hy_offset-8, text=value_text, fill='white', font=('Helvetica', 12, 'bold'), tags=(tag,))
+            color_label = 'Wild' if getattr(card, 'color', None) is None else getattr(card, 'color', 'Any')
+            self.canvas.create_text(x, y+hy_offset+10, text=color_label, fill='#eeeeee', font=('Helvetica', 9), tags=(tag,))
             # highlight lá hợp lệ nếu là lượt của người chơi
             playable = (card.color == getattr(top, 'color', None) or
                         getattr(card, 'value', None) == getattr(top, 'value', None) or
@@ -369,6 +376,15 @@ class UnoGUI:
                     self.draw_table()
                     messagebox.showinfo('UNO', 'Bạn đã sẵn sàng hô UNO!')
                 return
+
+    def on_double_click(self, event):
+        # nháy đúp vào lá bài ở giữa để mở hộp đổi tên
+        x, y = event.x, event.y
+        cx, cy = self.center
+        w = int(self.card_width * 1.2)
+        h = int(self.card_height * 1.2)
+        if (cx - w//2) <= x <= (cx + w//2) and (cy - h//2) <= y <= (cy + h//2):
+            self.open_rename_dialog()
 
     def ask_color_choice(self):
         # modal dialog to choose a color for Wild cards
