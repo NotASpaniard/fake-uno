@@ -73,11 +73,10 @@ class UnoGUI:
         self.deck_pos = (self.width - margin - self.card_width//2, self.height - margin - self.card_height//2)
         self.discard_pos = (self.center[0], self.center[1] - self.table_radius - 40)
 
-        # bàn
+        # cảnh phòng và mặt bàn
+        self.draw_environment()
         x, y = self.center
-        self.canvas.create_oval(x - self.table_radius, y - self.table_radius,
-                                x + self.table_radius, y + self.table_radius,
-                                fill='#1e3b2b', outline='')
+        self.draw_table_surface(x, y)
 
         # fixed player positions (bottom human, left bot, top bot, right bot)
         # ensure we have four players
@@ -117,6 +116,9 @@ class UnoGUI:
                 self.canvas.create_oval(px - avatar_w//2 - 6, py - avatar_h//2 - 6, px + avatar_w//2 + 6, py + avatar_h//2 + 6,
                                        outline='yellow', width=3)
 
+        # hình ảnh bot cầm bài
+        self.draw_bot_hands()
+
         # rút lá và huỷ
         self.draw_deck()
         self.draw_discard()
@@ -132,6 +134,63 @@ class UnoGUI:
                                     text=turn_text, fill='white', font=('Helvetica', 12, 'bold'))
         except Exception:
             pass
+
+    def draw_environment(self):
+        # nền phòng với gradient dọc đơn giản
+        shades = ['#1f1f1f', '#222222', '#252525', '#282828', '#2b2b2b', '#2e2e2e', '#313131', '#343434']
+        stripe_h = max(1, self.height // len(shades))
+        for i, c in enumerate(shades):
+            y0 = i * stripe_h
+            y1 = (i+1) * stripe_h
+            self.canvas.create_rectangle(0, y0, self.width, y1, fill=c, outline='')
+        # sàn phía dưới
+        floor_y0 = int(self.center[1] + self.table_radius + 70)
+        if floor_y0 < self.height:
+            self.canvas.create_rectangle(0, floor_y0, self.width, self.height, fill='#1a1a1a', outline='')
+
+    def draw_table_surface(self, x, y):
+        r = self.table_radius
+        # bóng bàn
+        self.canvas.create_oval(x - r, y - r + 6, x + r, y + r + 6, fill='#141414', outline='')
+        # viền gỗ nhiều lớp
+        self.canvas.create_oval(x - r, y - r, x + r, y + r, fill='#7b523b', outline='')
+        self.canvas.create_oval(x - r + 6, y - r + 6, x + r - 6, y + r - 6, fill='#6b452f', outline='')
+        self.canvas.create_oval(x - r + 12, y - r + 12, x + r - 12, y + r - 12, fill='#5e3b27', outline='')
+        # mặt nỉ xanh ở giữa
+        inner = max(40, r - 20)
+        self.canvas.create_oval(x - inner, y - inner, x + inner, y + inner, fill='#1e3b2b', outline='')
+
+    def draw_bot_hands(self):
+        if not self.players:
+            return
+        cx, cy = self.center
+        for i, p in enumerate(self.players):
+            if p.is_human:
+                continue
+            px, py = self.player_positions[i]
+            # neo vị trí bộ bài bot giữa avatar và bàn
+            ax = px + (cx - px) * 0.55
+            ay = py + (cy - py) * 0.55
+            # cánh tay
+            self.canvas.create_line(px, py, ax, ay, fill='#444', width=10)
+            # vẽ xòe lá úp
+            card_count = len(p.hand)
+            if card_count == 0:
+                continue
+            shown = min(6, card_count)
+            scale = 0.6
+            cw = int(self.card_width * scale)
+            ch = int(self.card_height * scale)
+            spacing = max(10, int(cw * 0.55))
+            mid = (shown - 1) / 2
+            for k in range(shown):
+                ox = ax + (k - mid) * spacing
+                oy = ay - abs(k - mid) * 2
+                # lớp nền và mặt sau lá bài
+                self.canvas.create_rectangle(ox - cw//2, oy - ch//2, ox + cw//2, oy + ch//2, fill='#111', outline='white', tags=('bot_hand',))
+                self.canvas.create_rectangle(ox - cw//2 + 3, oy - ch//2 + 3, ox + cw//2 - 3, oy + ch//2 - 3, fill='#333', outline='white', tags=('bot_hand',))
+            # hiển thị tổng số
+            self.canvas.create_text(ax, ay + ch//2 + 12, text=f"{card_count} cards", fill='white', font=('Helvetica', 9))
 
         # draw human hand at bottom each frame
         try:
