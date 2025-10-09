@@ -282,7 +282,8 @@ class UnoGUI:
             color_label = 'Wild' if getattr(card, 'color', None) is None else getattr(card, 'color', 'Any')
             self.canvas.create_text(x, y+hy_offset+10, text=color_label, fill='#eeeeee', font=('Helvetica', 9), tags=(tag,))
             # highlight lá hợp lệ nếu là lượt của người chơi
-            playable = (card.color == getattr(top, 'color', None) or
+            playable = (getattr(card, 'value', None) in ('Wild', 'Wild Draw Four') or
+                        card.color == getattr(top, 'color', None) or
                         getattr(card, 'value', None) == getattr(top, 'value', None) or
                         getattr(card, 'color', None) is None)
             if is_human_turn and playable:
@@ -471,7 +472,7 @@ class UnoGUI:
         player = self.players[0]
         card = player.hand[index]
         top = self.discard_pile[-1]
-        if (card.color == top.color or card.value == top.value or card.color is None):
+        if (card.value in ('Wild', 'Wild Draw Four') or card.color == top.color or card.value == top.value or card.color is None):
             played = player.hand.pop(index)
             # if human plays a wild, ask for color
             if played.color is None and played.value in ('Wild', 'Wild Draw Four') and player.is_human:
@@ -524,7 +525,8 @@ class UnoGUI:
             player.hand.append(card)
             # nếu lá rút đánh được, tự động chọn để người chơi có thể click chơi ngay
             top = self.discard_pile[-1]
-            if (card.color == getattr(top, 'color', None) or
+            if (getattr(card, 'value', None) in ('Wild', 'Wild Draw Four') or
+                getattr(card, 'color', None) == getattr(top, 'color', None) or
                 getattr(card, 'value', None) == getattr(top, 'value', None) or
                 getattr(card, 'color', None) is None):
                 self.selected_index = len(player.hand) - 1
@@ -744,6 +746,14 @@ class UnoGUI:
         if len(self.discard_pile) <= 1:
             return
         top = self.discard_pile.pop()
-        self.deck.cards = self.discard_pile[:]
+        # reset màu cho wild trước khi trộn lại vào bộ
+        reset_cards = []
+        for c in self.discard_pile:
+            if getattr(c, 'value', None) in ('Wild', 'Wild Draw Four'):
+                # tạo lá mới với color None để tránh side-effect
+                reset_cards.append(type(c)(None, c.value))
+            else:
+                reset_cards.append(c)
+        self.deck.cards = reset_cards
         random.shuffle(self.deck.cards)
         self.discard_pile = [top]
