@@ -23,9 +23,11 @@ class Deck:
         for color in COLORS:
             self.cards.append(Card(color, '0'))
             for value in VALUES[1:]:
-                self.cards.extend([Card(color, value)] * 2)
+                # tạo bản sao riêng cho mỗi lá, tránh trỏ cùng một object
+                self.cards.extend([Card(color, value) for _ in range(2)])
         for special in SPECIALS:
-            self.cards.extend([Card(None, special)] * 4)
+            # mỗi lá wild là một object riêng, không chia sẻ tham chiếu
+            self.cards.extend([Card(None, special) for _ in range(4)])
         random.shuffle(self.cards)
 
     def draw(self):
@@ -51,11 +53,14 @@ class Player:
                 self.hand.append(card)
 
     def play(self, top_card):
-        # simple AI: play first legal
+        # simple AI: play first legal; wild luôn có thể đánh
         for i, card in enumerate(self.hand):
-            if (card.color == top_card.color or
+            if (
+                card.value in SPECIALS or
+                card.color == top_card.color or
                 card.value == top_card.value or
-                card.color is None):
+                card.color is None
+            ):
                 return self.hand.pop(i)
         return None
 
